@@ -19,9 +19,9 @@ public:
     // Stop capturing
     void stop();
 
-    // Get audio data from circular buffer
+    // Get audio data from circular buffer as float [-1,1]
     // Returns number of samples copied
-    size_t getAudioData(std::vector<short>& outBuffer, size_t maxSamples);
+    size_t getAudioData(std::vector<float>& outBuffer, size_t maxSamples);
 
     // Get current buffer usage
     size_t getBufferUsage();
@@ -37,7 +37,7 @@ private:
     std::vector<short> tempBuffer;
     size_t chunkSamples;
 
-    std::vector<short> circularBuffer;
+    std::vector<float> circularBuffer;
     size_t bufferFront;
     size_t bufferEnd;
     std::mutex bufferMutex;
@@ -47,7 +47,8 @@ private:
     std::atomic<bool> running;
 
     // WaveIn callback
-    static void CALLBACK waveInCallback(HWAVEIN hwi, UINT uMsg, DWORD_PTR dwInstance,DWORD_PTR dwParam1, DWORD_PTR dwParam2);
+    static void CALLBACK waveInCallback(HWAVEIN hwi, UINT uMsg, DWORD_PTR dwInstance,
+        DWORD_PTR dwParam1, DWORD_PTR dwParam2);
 
     void handleData(WAVEHDR* header);
     void processingThread();

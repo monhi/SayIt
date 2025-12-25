@@ -84,15 +84,13 @@ void CWaveIn::stop() {
     waveInClose(hWaveIn);
 }
 
-size_t CWaveIn::getAudioData(std::vector<short>& outBuffer, size_t maxSamples) 
-{
+size_t CWaveIn::getAudioData(std::vector<float>& outBuffer, size_t maxSamples) {
     std::lock_guard<std::mutex> lock(bufferMutex);
     size_t available = (bufferEnd + circularBuffer.size() - bufferFront) % circularBuffer.size();
     size_t toCopy = min(maxSamples, available);
     outBuffer.resize(toCopy);
 
-    for (size_t i = 0; i < toCopy; ++i) 
-    {
+    for (size_t i = 0; i < toCopy; ++i) {
         outBuffer[i] = circularBuffer[(bufferFront + i) % circularBuffer.size()];
     }
     bufferFront = (bufferFront + toCopy) % circularBuffer.size();
@@ -104,35 +102,37 @@ size_t CWaveIn::getBufferUsage() {
     return (bufferEnd + circularBuffer.size() - bufferFront) % circularBuffer.size();
 }
 
-void CALLBACK CWaveIn::waveInCallback(HWAVEIN hwi, UINT uMsg, DWORD_PTR dwInstance,DWORD_PTR dwParam1, DWORD_PTR dwParam2)
+void CALLBACK CWaveIn::waveInCallback(HWAVEIN hwi, UINT uMsg, DWORD_PTR dwInstance,
+    DWORD_PTR dwParam1, DWORD_PTR dwParam2)
 {
-    if (uMsg == WIM_DATA) 
-    {
+    if (uMsg == WIM_DATA) {
         CWaveIn* pThis = reinterpret_cast<CWaveIn*>(dwInstance);
         pThis->handleData(reinterpret_cast<WAVEHDR*>(dwParam1));
-        printf(".");
     }
 }
 
-void CWaveIn::handleData(WAVEHDR* header) 
-{
+void CWaveIn::handleData(WAVEHDR* header) {
     std::lock_guard<std::mutex> lock(bufferMutex);
-    for (DWORD i = 0; i < header->dwBytesRecorded / sizeof(short); ++i) 
-    {
-        circularBuffer[bufferEnd] = reinterpret_cast<short*>(header->lpData)[i];
+    short* data = reinterpret_cast<short*>(header->lpData);
+
+    for (DWORD i = 0; i < header->dwBytesRecorded / sizeof(short); ++i) {
+        // Convert short PCM to float [-1,1]
+        float sample = static_cast<float>(data[i]) / 32768.0f;
+        circularBuffer[bufferEnd] = sample;
         bufferEnd = (bufferEnd + 1) % circularBuffer.size();
-        if (bufferEnd == bufferFront) 
-        {
-            bufferFront = (bufferFront + 1) % circularBuffer.size(); // overwrite old
+
+        // Overwrite old data if buffer full
+        if (bufferEnd == bufferFront) {
+            bufferFront = (bufferFront + 1) % circularBuffer.size();
         }
     }
-    waveInAddBuffer(hWaveIn, header, sizeof(WAVEHDR)); // re-add buffer
+
+    // Re-add buffer for next capture
+    waveInAddBuffer(hWaveIn, header, sizeof(WAVEHDR));
 }
 
-void CWaveIn::processingThread() 
-{
-    while (running) 
-    {
-        Sleep(10); // low CPU usage
+void CWaveIn::processingThread() {
+    while (running) {
+        Sleep(10);
     }
 }
