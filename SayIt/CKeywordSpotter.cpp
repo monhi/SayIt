@@ -25,12 +25,15 @@ CKeywordSpotter::CKeywordSpotter(const std::wstring& onnxModelPath)
     m_session = Ort::Session(m_env, onnxModelPath.c_str(), opts);
 
     m_features.resize(1 * 1 * MEL_BINS * NUM_FRAMES);
+    //m_samplesSinceLastInfer = 0;
+    //INFER_HOP = 1600; // 100 ms
+
 }
 
 // =========================
 // Public Audio Entry Point
 // =========================
-
+/*
 bool CKeywordSpotter::processAudio(const std::vector<float>& samples)
 {
     for (float s : samples)
@@ -41,6 +44,31 @@ bool CKeywordSpotter::processAudio(const std::vector<float>& samples)
 
     while (m_audioBuffer.size() > WINDOW_SIZE)
         m_audioBuffer.pop_front();
+
+    extractLogMel();
+    runInference();
+
+    return true;
+}
+*/
+bool CKeywordSpotter::processAudio(const std::vector<float>& samples)
+{
+    for (float s : samples)
+    {
+        m_audioBuffer.push_back(s);
+        m_samplesSinceLastInfer++;
+    }
+
+    if (m_audioBuffer.size() < WINDOW_SIZE)
+        return false;
+
+    while (m_audioBuffer.size() > WINDOW_SIZE)
+        m_audioBuffer.pop_front();
+
+    if (m_samplesSinceLastInfer < INFER_HOP)
+        return false;
+
+    m_samplesSinceLastInfer = 0;
 
     extractLogMel();
     runInference();
@@ -130,6 +158,8 @@ void CKeywordSpotter::runInference()
 
     int idx = argmax(logits, NUM_CLASSES);
     float conf = logits[idx];
+
+    std::cout << "idx:" << idx << std::endl;
 
     if (idx != NUM_CLASSES - 1 && conf > 0.7f)
     {

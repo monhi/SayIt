@@ -47,4 +47,7 @@ private:
 
     // Feature buffer: [1, 1, 40, 98]
     std::vector<float> m_features;
+    size_t m_samplesSinceLastInfer = 0;
+    static constexpr size_t INFER_HOP = 1600; // 100 ms
+
 };

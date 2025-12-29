@@ -4,6 +4,7 @@
 #include <vector>
 #include <string>
 #include "CKeywordSpotter.h"
+#include <fstream>
 
 int main() 
 {
@@ -12,23 +13,31 @@ int main()
     std::wstring stemp = lpFileName;
     stemp  = stemp.substr(0, stemp.find_last_of('\\')+1);
     stemp += L"kws.onnx";
-    
+    // std::string filename = "monhi123.raw";
+    // std::ofstream file(filename, std::ios::binary);
+
+
     CKeywordSpotter kws(stemp.c_str());
     CWaveIn mic(10);
     if (!mic.start()) return 1;
 
+    
+    std::cout << "This program should detect these words: down,go,left,no,right,stop,up,yes" << std::endl;
     std::cout << "Recording... Press ENTER to stop." << std::endl;
 
-    while (true) {
+    while (true) 
+    {
         if (_kbhit() && _getch() == 13) break;
 
         std::vector<float> audioChunk;
-        size_t n = mic.getAudioData(audioChunk, 1024);
+        size_t n = mic.getAudioData(audioChunk, 4096);
         if (n > 0) 
         {
-            std::cout << "." ;
-             //std::cout << "Samples read: " << n << std::endl;
+            // std::cout << n << ",";
+            // save data into a file.
+            // std::cout << "Samples read: " << n << std::endl;
             // Send audioChunk directly to ONNX feature extraction
+            //file.write(reinterpret_cast<const char*>(audioChunk.data()),audioChunk.size() * sizeof(float));
             kws.processAudio(audioChunk);
         }
         Sleep(2);

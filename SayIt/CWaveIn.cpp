@@ -6,14 +6,15 @@ CWaveIn::CWaveIn(size_t bufferSeconds)
     : SAMPLE_RATE(16000),
     NUM_CHANNELS(1),
     BITS_PER_SAMPLE(16),
-    CHUNK_MS(64),
+    CHUNK_MS(256),
     running(false),
     circularBuffer(bufferSeconds* SAMPLE_RATE),
     bufferFront(0),
     bufferEnd(0)
 {}
 
-CWaveIn::~CWaveIn() {
+CWaveIn::~CWaveIn() 
+{
     stop();
 }
 
@@ -66,7 +67,7 @@ bool CWaveIn::start() {
     }
 
     running = true;
-    captureThread = std::thread([this]() { this->processingThread(); });
+    //captureThread = std::thread([this]() { this->processingThread(); });
 
     return true;
 }
@@ -76,9 +77,10 @@ void CWaveIn::stop() {
     if (!running) return;
 
     running = false;
+    /*
     if (captureThread.joinable())
         captureThread.join();
-
+    */
     waveInStop(hWaveIn);
     waveInUnprepareHeader(hWaveIn, &waveHeader, sizeof(WAVEHDR));
     waveInClose(hWaveIn);
