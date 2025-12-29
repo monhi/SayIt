@@ -119,7 +119,8 @@ void CWaveIn::handleData(WAVEHDR* header) {
 
     for (DWORD i = 0; i < header->dwBytesRecorded / sizeof(short); ++i) {
         // Convert short PCM to float [-1,1]
-        float sample = static_cast<float>(data[i]) / 32768.0f;
+        //float sample = static_cast<float>(data[i]) / 32768.0f;
+        float sample = static_cast<float>(data[i]) / 8192.0f;
         circularBuffer[bufferEnd] = sample;
         bufferEnd = (bufferEnd + 1) % circularBuffer.size();
 
@@ -134,7 +135,8 @@ void CWaveIn::handleData(WAVEHDR* header) {
 }
 
 void CWaveIn::processingThread() {
-    while (running) {
+    while (running) 
+    {
         Sleep(10);
     }
 }

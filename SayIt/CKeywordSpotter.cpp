@@ -1,17 +1,21 @@
 #include "CKeywordSpotter.h"
-
 #include <iostream>
 #include <cmath>
 #include <algorithm>
-#include <array>
 #include "kissfft/kiss_fftr.h"
+#define M_PI       3.14159265358979323846   // pi
 
 
+const char* CKeywordSpotter::LABELS[NUM_CLASSES] =
+{
+    "down", "go", "left", "no",
+    "right", "stop", "up", "yes",
+    "_noise_"
+};
 
 // =========================
 // Constructor
 // =========================
-
 CKeywordSpotter::CKeywordSpotter(const std::wstring& onnxModelPath)
     : m_env(ORT_LOGGING_LEVEL_WARNING, "kws"),
     m_session(nullptr),
@@ -25,47 +29,55 @@ CKeywordSpotter::CKeywordSpotter(const std::wstring& onnxModelPath)
     m_session = Ort::Session(m_env, onnxModelPath.c_str(), opts);
 
     m_features.resize(1 * 1 * MEL_BINS * NUM_FRAMES);
-    //m_samplesSinceLastInfer = 0;
-    //INFER_HOP = 1600; // 100 ms
 
+    m_fftCfg = kiss_fftr_alloc(FFT_SIZE, 0, nullptr, nullptr);
+
+    initMelFilterBank();
 }
 
 // =========================
-// Public Audio Entry Point
+// Mel filter bank initialization
 // =========================
-/*
-bool CKeywordSpotter::processAudio(const std::vector<float>& samples)
+void CKeywordSpotter::initMelFilterBank()
 {
-    for (float s : samples)
-        m_audioBuffer.push_back(s);
+    m_melFilterBank.resize(MEL_BINS, std::vector<float>(FFT_SIZE / 2 + 1, 0.0f));
 
-    if (m_audioBuffer.size() < WINDOW_SIZE)
-        return false;
+    auto hzToMel = [](float hz) { return 2595.0f * log10f(1.0f + hz / 700.0f); };
+    auto melToHz = [](float mel) { return 700.0f * (powf(10.0f, mel / 2595.0f) - 1.0f); };
 
-    while (m_audioBuffer.size() > WINDOW_SIZE)
-        m_audioBuffer.pop_front();
+    float melLow = hzToMel(0);
+    float melHigh = hzToMel(SAMPLE_RATE / 2);
+    std::vector<float> melPoints(MEL_BINS + 2);
+    for (int i = 0; i < MEL_BINS + 2; i++)
+        melPoints[i] = melToHz(melLow + (melHigh - melLow) * i / (MEL_BINS + 1));
 
-    extractLogMel();
-    runInference();
+    // Bin indices
+    std::vector<int> bin(MEL_BINS + 2);
+    for (int i = 0; i < MEL_BINS + 2; i++)
+        bin[i] = static_cast<int>(floorf((FFT_SIZE + 1) * melPoints[i] / SAMPLE_RATE));
 
-    return true;
-}
-*/
-bool CKeywordSpotter::processAudio(const std::vector<float>& samples)
-{
-    for (float s : samples)
+    for (int m = 0; m < MEL_BINS; m++)
     {
-        m_audioBuffer.push_back(s);
-        m_samplesSinceLastInfer++;
+        for (int k = bin[m]; k < bin[m + 1]; k++)
+            m_melFilterBank[m][k] = (k - bin[m]) / float(bin[m + 1] - bin[m]);
+        for (int k = bin[m + 1]; k < bin[m + 2]; k++)
+            m_melFilterBank[m][k] = (bin[m + 2] - k) / float(bin[m + 2] - bin[m + 1]);
     }
+}
 
-    if (m_audioBuffer.size() < WINDOW_SIZE)
-        return false;
+// =========================
+// Process audio
+// =========================
+bool CKeywordSpotter::processAudio(const std::vector<float>& samples)
+{
+    for (float s : samples)
+        m_audioBuffer.push_back(s);
 
     while (m_audioBuffer.size() > WINDOW_SIZE)
         m_audioBuffer.pop_front();
 
-    if (m_samplesSinceLastInfer < INFER_HOP)
+    m_samplesSinceLastInfer += samples.size();
+    if (m_audioBuffer.size() < WINDOW_SIZE || m_samplesSinceLastInfer < HOP_LEN * 10) // 1600 samples hop
         return false;
 
     m_samplesSinceLastInfer = 0;
@@ -77,65 +89,47 @@ bool CKeywordSpotter::processAudio(const std::vector<float>& samples)
 }
 
 // =========================
-// Log-Mel Extraction (kissFFT)
+// Extract log-mel
 // =========================
-
 void CKeywordSpotter::extractLogMel()
 {
     std::fill(m_features.begin(), m_features.end(), 0.0f);
 
-    kiss_fftr_cfg fftCfg = kiss_fftr_alloc(FFT_SIZE, 0, nullptr, nullptr);
-
     std::vector<float> frame(FRAME_LEN);
     std::vector<float> window(FRAME_LEN);
-    std::vector<kiss_fft_cpx> fftOut(FFT_SIZE / 2 + 1);
 
-    // Hann window
     for (int i = 0; i < FRAME_LEN; i++)
-        window[i] = 0.5f - 0.5f * cosf(2.0f * 3.1415926535f * i / FRAME_LEN);
+        window[i] = 0.5f - 0.5f * cosf(2 * M_PI * i / FRAME_LEN);
 
-    int frameIdx = 0;
+    kiss_fft_cpx fftOut[FFT_SIZE / 2 + 1];
 
-    for (int offset = 0;
-        offset + FRAME_LEN <= WINDOW_SIZE;
-        offset += HOP_LEN)
+    for (int frame_idx = 0; frame_idx < NUM_FRAMES; frame_idx++)
     {
+        int offset = frame_idx * HOP_LEN;
         for (int i = 0; i < FRAME_LEN; i++)
             frame[i] = m_audioBuffer[offset + i] * window[i];
 
-        kiss_fftr(fftCfg, frame.data(), fftOut.data());
+        kiss_fftr(m_fftCfg, frame.data(), fftOut);
 
         for (int m = 0; m < MEL_BINS; m++)
         {
             float energy = 0.0f;
-
-            // Simplified band energy (placeholder)
-            for (int k = 1; k < FFT_SIZE / 2; k++)
-                energy += fftOut[k].r * fftOut[k].r;
-
-            m_features[m * NUM_FRAMES + frameIdx] =
-                logf(energy + 1e-6f);
+            for (int k = 0; k <= FFT_SIZE / 2; k++)
+            {
+                float mag = sqrtf(fftOut[k].r * fftOut[k].r + fftOut[k].i * fftOut[k].i);
+                energy += m_melFilterBank[m][k] * mag * mag;
+            }
+            m_features[m * NUM_FRAMES + frame_idx] = logf(energy + 1e-6f);
         }
-
-        frameIdx++;
-        if (frameIdx >= NUM_FRAMES)
-            break;
     }
-
-    free(fftCfg);
 }
 
 // =========================
-// ONNX Inference
+// Run ONNX inference
 // =========================
-
 void CKeywordSpotter::runInference()
 {
-    std::array<int64_t, 4> shape =
-    {
-        1, 1, MEL_BINS, NUM_FRAMES
-    };
-
+    std::array<int64_t, 4> shape = { 1,1,MEL_BINS,NUM_FRAMES };
     Ort::Value inputTensor = Ort::Value::CreateTensor<float>(
         m_memoryInfo,
         m_features.data(),
@@ -159,34 +153,25 @@ void CKeywordSpotter::runInference()
     int idx = argmax(logits, NUM_CLASSES);
     float conf = logits[idx];
 
-    std::cout << "idx:" << idx << std::endl;
-
-    if (idx != NUM_CLASSES - 1 && conf > 0.7f)
+    if (idx != NUM_CLASSES - 1 && conf > 0.7f && idx != m_lastDetectedWord)
     {
-        std::cout << "Detected: "
-            << LABELS[idx]
-            << " ("
-            << conf
-            << ")"
-            << std::endl;
+        std::cout << "Detected: " << LABELS[idx] << " (" << conf << ")" << std::endl;
+        m_lastDetectedWord = idx;
     }
 }
 
 // =========================
 // Utilities
 // =========================
-
 void CKeywordSpotter::softmax(float* x, int n)
 {
     float maxVal = *std::max_element(x, x + n);
     float sum = 0.0f;
-
     for (int i = 0; i < n; i++)
     {
         x[i] = expf(x[i] - maxVal);
         sum += x[i];
     }
-
     for (int i = 0; i < n; i++)
         x[i] /= sum;
 }
