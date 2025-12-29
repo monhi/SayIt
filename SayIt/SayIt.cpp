@@ -2,8 +2,18 @@
 #include <conio.h>
 #include <iostream>
 #include <vector>
+#include <string>
+#include "CKeywordSpotter.h"
 
-int main() {
+int main() 
+{
+    TCHAR lpFileName[MAX_PATH] = {0};
+    GetModuleFileName(nullptr, lpFileName, MAX_PATH);
+    std::wstring stemp = lpFileName;
+    stemp  = stemp.substr(0, stemp.find_last_of('\\')+1);
+    stemp += L"kws.onnx";
+    
+    CKeywordSpotter kws(stemp.c_str());
     CWaveIn mic(10);
     if (!mic.start()) return 1;
 
@@ -16,13 +26,13 @@ int main() {
         size_t n = mic.getAudioData(audioChunk, 1024);
         if (n > 0) 
         {
-            std::cout << "Samples read: " << n << std::endl;
+            std::cout << "." ;
+             //std::cout << "Samples read: " << n << std::endl;
             // Send audioChunk directly to ONNX feature extraction
+            kws.processAudio(audioChunk);
         }
-
-        Sleep(10);
+        Sleep(2);
     }
-
     mic.stop();
     return 0;
 }

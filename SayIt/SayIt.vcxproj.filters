@@ -13,6 +13,18 @@
       <UniqueIdentifier>{67DA6AB6-F800-4c08-8B7A-83BB121AAD01}</UniqueIdentifier>
       <Extensions>rc;ico;cur;bmp;dlg;rc2;rct;bin;rgs;gif;jpg;jpeg;jpe;resx;tiff;tif;png;wav;mfcribbon-ms</Extensions>
     </Filter>
+    <Filter Include="Header Files\onnxruntime-win-x64-1.23.2">
+      <UniqueIdentifier>{67581ab3-c514-4cb0-a5af-6d76467fc551}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\onnxruntime-win-x64-1.23.2\include">
+      <UniqueIdentifier>{c30db96c-eec8-4e7d-8af0-d998f5cc3c9c}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Header Files\kissfft">
+      <UniqueIdentifier>{44ace17b-97b5-4b3b-aa4f-94afa714ef35}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="Source Files\kissfft">
+      <UniqueIdentifier>{d4408cfa-36b6-466f-ab3e-cd8455bca936}</UniqueIdentifier>
+    </Filter>
   </ItemGroup>
   <ItemGroup>
     <ClCompile Include="SayIt.cpp">
@@ -21,10 +33,97 @@
     <ClCompile Include="CWaveIn.cpp">
       <Filter>Source Files</Filter>
     </ClCompile>
+    <ClCompile Include="CKeywordSpotter.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="kissfft\kiss_fftr.c">
+      <Filter>Source Files\kissfft</Filter>
+    </ClCompile>
+    <ClCompile Include="kissfft\kfc.c">
+      <Filter>Source Files\kissfft</Filter>
+    </ClCompile>
+    <ClCompile Include="kissfft\kiss_fft.c">
+      <Filter>Source Files\kissfft</Filter>
+    </ClCompile>
+    <ClCompile Include="kissfft\kiss_fftnd.c">
+      <Filter>Source Files\kissfft</Filter>
+    </ClCompile>
+    <ClCompile Include="kissfft\kiss_fftndr.c">
+      <Filter>Source Files\kissfft</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="CWaveIn.h">
       <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="onnxruntime-win-x64-1.23.2\include\cpu_provider_factory.h">
+      <Filter>Header Files\onnxruntime-win-x64-1.23.2\include</Filter>
+    </ClInclude>
+    <ClInclude Include="onnxruntime-win-x64-1.23.2\include\onnxruntime_c_api.h">
+      <Filter>Header Files\onnxruntime-win-x64-1.23.2\include</Filter>
+    </ClInclude>
+    <ClInclude Include="onnxruntime-win-x64-1.23.2\include\onnxruntime_cxx_api.h">
+      <Filter>Header Files\onnxruntime-win-x64-1.23.2\include</Filter>
+    </ClInclude>
+    <ClInclude Include="onnxruntime-win-x64-1.23.2\include\onnxruntime_cxx_inline.h">
+      <Filter>Header Files\onnxruntime-win-x64-1.23.2\include</Filter>
+    </ClInclude>
+    <ClInclude Include="onnxruntime-win-x64-1.23.2\include\onnxruntime_ep_c_api.h">
+      <Filter>Header Files\onnxruntime-win-x64-1.23.2\include</Filter>
+    </ClInclude>
+    <ClInclude Include="onnxruntime-win-x64-1.23.2\include\onnxruntime_ep_device_ep_metadata_keys.h">
+      <Filter>Header Files\onnxruntime-win-x64-1.23.2\include</Filter>
+    </ClInclude>
+    <ClInclude Include="onnxruntime-win-x64-1.23.2\include\onnxruntime_float16.h">
+      <Filter>Header Files\onnxruntime-win-x64-1.23.2\include</Filter>
+    </ClInclude>
+    <ClInclude Include="onnxruntime-win-x64-1.23.2\include\onnxruntime_lite_custom_op.h">
+      <Filter>Header Files\onnxruntime-win-x64-1.23.2\include</Filter>
+    </ClInclude>
+    <ClInclude Include="onnxruntime-win-x64-1.23.2\include\onnxruntime_run_options_config_keys.h">
+      <Filter>Header Files\onnxruntime-win-x64-1.23.2\include</Filter>
+    </ClInclude>
+    <ClInclude Include="onnxruntime-win-x64-1.23.2\include\onnxruntime_session_options_config_keys.h">
+      <Filter>Header Files\onnxruntime-win-x64-1.23.2\include</Filter>
+    </ClInclude>
+    <ClInclude Include="onnxruntime-win-x64-1.23.2\include\onnxruntime_training_c_api.h">
+      <Filter>Header Files\onnxruntime-win-x64-1.23.2\include</Filter>
+    </ClInclude>
+    <ClInclude Include="onnxruntime-win-x64-1.23.2\include\onnxruntime_training_cxx_api.h">
+      <Filter>Header Files\onnxruntime-win-x64-1.23.2\include</Filter>
+    </ClInclude>
+    <ClInclude Include="onnxruntime-win-x64-1.23.2\include\onnxruntime_training_cxx_inline.h">
+      <Filter>Header Files\onnxruntime-win-x64-1.23.2\include</Filter>
+    </ClInclude>
+    <ClInclude Include="onnxruntime-win-x64-1.23.2\include\provider_options.h">
+      <Filter>Header Files\onnxruntime-win-x64-1.23.2\include</Filter>
+    </ClInclude>
+    <ClInclude Include="CKeywordSpotter.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="kissfft\kfc.h">
+      <Filter>Header Files\kissfft</Filter>
+    </ClInclude>
+    <ClInclude Include="kissfft\kiss_fft.h">
+      <Filter>Header Files\kissfft</Filter>
+    </ClInclude>
+    <ClInclude Include="kissfft\kiss_fft_log.h">
+      <Filter>Header Files\kissfft</Filter>
+    </ClInclude>
+    <ClInclude Include="kissfft\kiss_fftnd.h">
+      <Filter>Header Files\kissfft</Filter>
+    </ClInclude>
+    <ClInclude Include="kissfft\kiss_fftndr.h">
+      <Filter>Header Files\kissfft</Filter>
+    </ClInclude>
+    <ClInclude Include="kissfft\kiss_fftr.h">
+      <Filter>Header Files\kissfft</Filter>
+    </ClInclude>
+    <ClInclude Include="kissfft\kissfft.hh">
+      <Filter>Header Files\kissfft</Filter>
+    </ClInclude>
+    <ClInclude Include="kissfft\kissfft_i32.hh">
+      <Filter>Header Files\kissfft</Filter>
     </ClInclude>
   </ItemGroup>
 </Project>
