@@ -13,8 +13,8 @@ int main()
     std::wstring stemp = lpFileName;
     stemp  = stemp.substr(0, stemp.find_last_of('\\')+1);
     stemp += L"kws.onnx";
-    // std::string filename = "monhi123.raw";
-    // std::ofstream file(filename, std::ios::binary);
+     std::string filename = "monhi123.raw";
+     std::ofstream file(filename, std::ios::binary);
 
 
     CKeywordSpotter kws(stemp.c_str());
@@ -37,7 +37,7 @@ int main()
             // save data into a file.
             // std::cout << "Samples read: " << n << std::endl;
             // Send audioChunk directly to ONNX feature extraction
-            //file.write(reinterpret_cast<const char*>(audioChunk.data()),audioChunk.size() * sizeof(float));
+            file.write(reinterpret_cast<const char*>(audioChunk.data()),audioChunk.size() * sizeof(float));
             kws.processAudio(audioChunk);
         }
         Sleep(2);
