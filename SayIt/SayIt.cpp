@@ -5,24 +5,38 @@
 #include <string>
 #include "CKeywordSpotter.h"
 #include <fstream>
+#include "WavReader.h"
 
-int main() 
+int main(int argc, char* argv[])
 {
     TCHAR lpFileName[MAX_PATH] = {0};
     GetModuleFileName(nullptr, lpFileName, MAX_PATH);
     std::wstring stemp = lpFileName;
     stemp  = stemp.substr(0, stemp.find_last_of('\\')+1);
     stemp += L"kws.onnx";
-     std::string filename = "monhi123.raw";
-     std::ofstream file(filename, std::ios::binary);
+    KeywordSpotter kws(stemp.c_str());
 
+    std::cout << "This program should detect these words: down,go,left,no,right,stop,up,yes" << std::endl;
 
-    CKeywordSpotter kws(stemp.c_str());
+    if ( argc > 1 )
+    {
+        std::vector<float> wav;
+        if (!WavReader::loadMono16k(argv[1], wav))
+        {
+            return 1;
+        }            
+
+        std::cout << "Offline WAV test: " << argv[1] << std::endl;
+        kws.processWavFile(wav);
+        return 0;
+    }
+
+    std::string filename = "monhi123.raw";
+    std::ofstream file(filename, std::ios::binary);
+
     CWaveIn mic(10);
     if (!mic.start()) return 1;
-
-    
-    std::cout << "This program should detect these words: down,go,left,no,right,stop,up,yes" << std::endl;
+      
     std::cout << "Recording... Press ENTER to stop." << std::endl;
 
     while (true) 

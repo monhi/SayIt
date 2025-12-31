@@ -1,182 +1,282 @@
 #include "CKeywordSpotter.h"
-#include <iostream>
 #include <cmath>
 #include <algorithm>
-#include "kissfft/kiss_fftr.h"
-#define M_PI       3.14159265358979323846   // pi
+#include <iostream>
+#include <cassert>
+#include <vector>
+#include <deque>
 
-
-const char* CKeywordSpotter::LABELS[NUM_CLASSES] =
+KeywordSpotter::KeywordSpotter(const std::wstring& onnxPath)
+    : m_env(ORT_LOGGING_LEVEL_WARNING, "kws")
+    , m_session(m_env, onnxPath.c_str(), Ort::SessionOptions{ nullptr })
+    , m_fftCfg(nullptr)
 {
-    "down", "go", "left", "no",
-    "right", "stop", "up", "yes",
-    "_noise_"
-};
+    // Get input/output names
+    auto allocator = Ort::AllocatorWithDefaultOptions();
+    m_inputName = m_session.GetInputNameAllocated(0, allocator).get();
+    m_outputName = m_session.GetOutputNameAllocated(0, allocator).get();
 
-// =========================
-// Constructor
-// =========================
-CKeywordSpotter::CKeywordSpotter(const std::wstring& onnxModelPath)
-    : m_env(ORT_LOGGING_LEVEL_WARNING, "kws"),
-    m_session(nullptr),
-    m_memoryInfo(Ort::MemoryInfo::CreateCpu(
-        OrtArenaAllocator, OrtMemTypeDefault))
-{
-    Ort::SessionOptions opts;
-    opts.SetIntraOpNumThreads(1);
-    opts.SetGraphOptimizationLevel(GraphOptimizationLevel::ORT_ENABLE_BASIC);
+    // Allocate FFT
+    m_fftCfg = kiss_fftr_alloc(N_FFT, 0, nullptr, nullptr);
+    if (!m_fftCfg) {
+        throw std::runtime_error("Failed to allocate KissFFT config");
+    }
 
-    m_session = Ort::Session(m_env, onnxModelPath.c_str(), opts);
+    m_fftFrame.resize(N_FFT, 0.0f);
+    m_fftOut.resize(N_FFT / 2 + 1);
 
-    m_features.resize(1 * 1 * MEL_BINS * NUM_FRAMES);
-
-    m_fftCfg = kiss_fftr_alloc(FFT_SIZE, 0, nullptr, nullptr);
-
+    // Initialize windows and filters
+    initHannWindow();
     initMelFilterBank();
+
+    // Feature buffer: N_MELS × FRAMES
+    m_features.resize(N_MELS * FRAMES, 0.0f);
 }
 
-// =========================
-// Mel filter bank initialization
-// =========================
-void CKeywordSpotter::initMelFilterBank()
+KeywordSpotter::~KeywordSpotter()
 {
-    m_melFilterBank.resize(MEL_BINS, std::vector<float>(FFT_SIZE / 2 + 1, 0.0f));
-
-    auto hzToMel = [](float hz) { return 2595.0f * log10f(1.0f + hz / 700.0f); };
-    auto melToHz = [](float mel) { return 700.0f * (powf(10.0f, mel / 2595.0f) - 1.0f); };
-
-    float melLow = hzToMel(0);
-    float melHigh = hzToMel(SAMPLE_RATE / 2);
-    std::vector<float> melPoints(MEL_BINS + 2);
-    for (int i = 0; i < MEL_BINS + 2; i++)
-        melPoints[i] = melToHz(melLow + (melHigh - melLow) * i / (MEL_BINS + 1));
-
-    // Bin indices
-    std::vector<int> bin(MEL_BINS + 2);
-    for (int i = 0; i < MEL_BINS + 2; i++)
-        bin[i] = static_cast<int>(floorf((FFT_SIZE + 1) * melPoints[i] / SAMPLE_RATE));
-
-    for (int m = 0; m < MEL_BINS; m++)
-    {
-        for (int k = bin[m]; k < bin[m + 1]; k++)
-            m_melFilterBank[m][k] = (k - bin[m]) / float(bin[m + 1] - bin[m]);
-        for (int k = bin[m + 1]; k < bin[m + 2]; k++)
-            m_melFilterBank[m][k] = (bin[m + 2] - k) / float(bin[m + 2] - bin[m + 1]);
+    if (m_fftCfg) {
+        kiss_fft_free(m_fftCfg);
     }
 }
 
-// =========================
-// Process audio
-// =========================
-bool CKeywordSpotter::processAudio(const std::vector<float>& samples)
+void KeywordSpotter::initHannWindow()
 {
-    for (float s : samples)
-        m_audioBuffer.push_back(s);
-
-    while (m_audioBuffer.size() > WINDOW_SIZE)
-        m_audioBuffer.pop_front();
-
-    m_samplesSinceLastInfer += samples.size();
-    if (m_audioBuffer.size() < WINDOW_SIZE || m_samplesSinceLastInfer < HOP_LEN * 10) // 1600 samples hop
-        return false;
-
-    m_samplesSinceLastInfer = 0;
-
-    extractLogMel();
-    runInference();
-
-    return true;
+    m_hannWindow.resize(WIN_LENGTH);
+    const float PI = 3.14159265358979323846f;
+    for (int i = 0; i < WIN_LENGTH; ++i) {
+        m_hannWindow[i] = 0.5f - 0.5f * std::cos(2.0f * PI * i / (WIN_LENGTH - 1));
+    }
 }
 
-// =========================
-// Extract log-mel
-// =========================
-void CKeywordSpotter::extractLogMel()
+float KeywordSpotter::hz_to_mel(float hz)
 {
-    std::fill(m_features.begin(), m_features.end(), 0.0f);
+    // Slaney-style mel scale (matches modern librosa)
+    const float f_min = 0.0f;
+    const float f_sp = 200.0f / 3.0f;
+    const float min_log_hz = 1000.0f;
+    const float min_log_mel = (min_log_hz - f_min) / f_sp;
+    const float logstep = std::log(6.4f) / 27.0f;
 
-    std::vector<float> frame(FRAME_LEN);
-    std::vector<float> window(FRAME_LEN);
+    if (hz < min_log_hz) {
+        return (hz - f_min) / f_sp;
+    }
+    else {
+        return min_log_mel + std::log(hz / min_log_hz) / logstep;
+    }
+}
 
-    for (int i = 0; i < FRAME_LEN; i++)
-        window[i] = 0.5f - 0.5f * cosf(2 * M_PI * i / FRAME_LEN);
+float KeywordSpotter::mel_to_hz(float mel)
+{
+    const float f_min = 0.0f;
+    const float f_sp = 200.0f / 3.0f;
+    const float min_log_hz = 1000.0f;
+    const float min_log_mel = (min_log_hz - f_min) / f_sp;
+    const float logstep = std::log(6.4f) / 27.0f;
 
-    kiss_fft_cpx fftOut[FFT_SIZE / 2 + 1];
+    if (mel < min_log_mel) {
+        return f_min + f_sp * mel;
+    }
+    else {
+        return min_log_hz * std::exp(logstep * (mel - min_log_mel));
+    }
+}
 
-    for (int frame_idx = 0; frame_idx < NUM_FRAMES; frame_idx++)
-    {
-        int offset = frame_idx * HOP_LEN;
-        for (int i = 0; i < FRAME_LEN; i++)
-            frame[i] = m_audioBuffer[offset + i] * window[i];
+void KeywordSpotter::initMelFilterBank()
+{
+    m_melFilterBank.assign(N_MELS, std::vector<float>(N_FFT / 2 + 1, 0.0f));
 
-        kiss_fftr(m_fftCfg, frame.data(), fftOut);
+    float mel_low = hz_to_mel(0.0f);
+    float mel_high = hz_to_mel(SAMPLE_RATE / 2.0f);
 
-        for (int m = 0; m < MEL_BINS; m++)
-        {
-            float energy = 0.0f;
-            for (int k = 0; k <= FFT_SIZE / 2; k++)
-            {
-                float mag = sqrtf(fftOut[k].r * fftOut[k].r + fftOut[k].i * fftOut[k].i);
-                energy += m_melFilterBank[m][k] * mag * mag;
+    std::vector<float> mel_points(N_MELS + 2);
+    for (int i = 0; i < N_MELS + 2; ++i) {
+        mel_points[i] = mel_low + i * (mel_high - mel_low) / (N_MELS + 1.0f);
+    }
+
+    std::vector<float> hz_points(N_MELS + 2);
+    for (int i = 0; i < N_MELS + 2; ++i) {
+        hz_points[i] = mel_to_hz(mel_points[i]);
+    }
+
+    // Build triangular filters
+    for (int m = 0; m < N_MELS; ++m) {
+        float left = hz_points[m];
+        float center = hz_points[m + 1];
+        float right = hz_points[m + 2];
+
+        for (int k = 0; k <= N_FFT / 2; ++k) {
+            float freq = static_cast<float>(k) * SAMPLE_RATE / N_FFT;
+            if (freq >= left && freq <= center) {
+                m_melFilterBank[m][k] = (freq - left) / (center - left);
             }
-            m_features[m * NUM_FRAMES + frame_idx] = logf(energy + 1e-6f);
+            else if (freq > center && freq <= right) {
+                m_melFilterBank[m][k] = (right - freq) / (right - center);
+            }
+        }
+    }
+
+    // Apply Slaney normalization: 2 / (right - left)
+    for (int m = 0; m < N_MELS; ++m) {
+        float enorm = 2.0f / (hz_points[m + 2] - hz_points[m]);
+        for (int k = 0; k <= N_FFT / 2; ++k) {
+            m_melFilterBank[m][k] *= enorm;
         }
     }
 }
 
-// =========================
-// Run ONNX inference
-// =========================
-void CKeywordSpotter::runInference()
+bool KeywordSpotter::processAudio(const std::vector<float>& samples)
 {
-    std::array<int64_t, 4> shape = { 1,1,MEL_BINS,NUM_FRAMES };
-    Ort::Value inputTensor = Ort::Value::CreateTensor<float>(
-        m_memoryInfo,
+    for (float s : samples) {
+        m_audioBuffer.push_back(s);
+    }
+
+    if (m_audioBuffer.size() < WINDOW_SIZE) {
+        return false;
+    }
+
+    // Simple hop control (process every HOP_LENGTH new samples)
+    m_samplesSinceLastInfer += samples.size();
+    if (m_samplesSinceLastInfer < HOP_LENGTH) {
+        return false;
+    }
+    m_samplesSinceLastInfer = 0;
+
+    while (m_audioBuffer.size() >= WINDOW_SIZE) {
+        extractLogMel();
+        runInference();
+
+        // Slide window
+        for (int i = 0; i < HOP_LENGTH; ++i) {
+            m_audioBuffer.pop_front();
+        }
+    }
+
+    return true;
+}
+
+void KeywordSpotter::processWavFile(const std::vector<float>& samples)
+{
+    m_audioBuffer.clear();
+    for (float s : samples) {
+        m_audioBuffer.push_back(s);
+    }
+
+    if (m_audioBuffer.size() < WINDOW_SIZE) {
+        std::cout << "WAV too short\n";
+        return;
+    }
+
+    size_t offset = 0;
+    while (offset + WINDOW_SIZE <= m_audioBuffer.size()) {
+        // Copy current 1-second window
+        std::deque<float> window(m_audioBuffer.begin() + offset,
+            m_audioBuffer.begin() + offset + WINDOW_SIZE);
+        m_audioBuffer = std::move(window);
+
+        extractLogMel();
+        runInference();
+
+        offset += HOP_LENGTH;
+    }
+}
+
+void KeywordSpotter::extractLogMel()
+{
+    assert(m_audioBuffer.size() >= WINDOW_SIZE);
+
+    // Reflective padding to match librosa's default 'reflect' mode
+    const int pad = N_FFT / 2; // 256
+    std::vector<float> padded(WINDOW_SIZE + 2 * pad);
+
+    // Left reflect
+    for (int i = 0; i < pad; ++i) {
+        padded[i] = m_audioBuffer[pad - 1 - i];
+    }
+    // Center
+    std::copy(m_audioBuffer.begin(), m_audioBuffer.end(), padded.begin() + pad);
+    // Right reflect
+    for (int i = 0; i < pad; ++i) {
+        padded[pad + WINDOW_SIZE + i] = m_audioBuffer[WINDOW_SIZE - 2 - i];
+    }
+
+    for (int frame_idx = 0; frame_idx < FRAMES; ++frame_idx) {
+        int start = frame_idx * HOP_LENGTH;
+
+        // Apply window
+        for (int i = 0; i < WIN_LENGTH; ++i) {
+            m_fftFrame[i] = padded[start + i] * m_hannWindow[i];
+        }
+        // Zero-pad rest
+        std::fill(m_fftFrame.begin() + WIN_LENGTH, m_fftFrame.end(), 0.0f);
+
+        // FFT
+        kiss_fftr(m_fftCfg, m_fftFrame.data(), m_fftOut.data());
+
+        // Mel energy
+        for (int m = 0; m < N_MELS; ++m) {
+            float energy = 0.0f;
+            for (int k = 0; k <= N_FFT / 2; ++k) {
+                float re = m_fftOut[k].r;
+                float im = m_fftOut[k].i;
+                energy += m_melFilterBank[m][k] * (re * re + im * im);
+            }
+            energy = std::max(energy, 1e-10f);
+            m_features[m * FRAMES + frame_idx] = std::log(energy);
+        }
+    }
+    // No normalization — matches training
+}
+
+void KeywordSpotter::runInference()
+{
+    Ort::MemoryInfo memoryInfo = Ort::MemoryInfo::CreateCpu(OrtArenaAllocator, OrtMemTypeDefault);
+
+    std::array<int64_t, 4> input_shape = { 1, 1, N_MELS, FRAMES };
+
+    Ort::Value input_tensor = Ort::Value::CreateTensor<float>(
+        memoryInfo,
         m_features.data(),
         m_features.size(),
-        shape.data(),
-        shape.size()
+        input_shape.data(),
+        input_shape.size()
     );
 
-    const char* inputNames[] = { "input" };
-    const char* outputNames[] = { "logits" };
+    const char* input_names[] = { m_inputName.c_str() };
+    const char* output_names[] = { m_outputName.c_str() };
 
-    auto outputs = m_session.Run(
+    auto output_tensors = m_session.Run(
         Ort::RunOptions{ nullptr },
-        inputNames, &inputTensor, 1,
-        outputNames, 1
+        input_names, &input_tensor, 1,
+        output_names, 1
     );
 
-    float* logits = outputs[0].GetTensorMutableData<float>();
-    softmax(logits, NUM_CLASSES);
+    float* logits = output_tensors[0].GetTensorMutableData<float>();
 
-    int idx = argmax(logits, NUM_CLASSES);
-    float conf = logits[idx];
-
-    if (idx != NUM_CLASSES - 1 && conf > 0.7f && idx != m_lastDetectedWord)
-    {
-        std::cout << "Detected: " << LABELS[idx] << " (" << conf << ")" << std::endl;
-        m_lastDetectedWord = idx;
-    }
-}
-
-// =========================
-// Utilities
-// =========================
-void CKeywordSpotter::softmax(float* x, int n)
-{
-    float maxVal = *std::max_element(x, x + n);
+    // Softmax for proper confidence
+    float max_logit = *std::max_element(logits, logits + NUM_CLASSES);
+    std::vector<float> probs(NUM_CLASSES);
     float sum = 0.0f;
-    for (int i = 0; i < n; i++)
-    {
-        x[i] = expf(x[i] - maxVal);
-        sum += x[i];
+    for (int i = 0; i < NUM_CLASSES; ++i) {
+        probs[i] = std::exp(logits[i] - max_logit);
+        sum += probs[i];
     }
-    for (int i = 0; i < n; i++)
-        x[i] /= sum;
+    for (int i = 0; i < NUM_CLASSES; ++i) {
+        probs[i] /= sum;
+    }
+
+    int pred_idx = std::max_element(probs.begin(), probs.end()) - probs.begin();
+    float confidence = probs[pred_idx];
+
+    // Adjust threshold based on your model's performance (0.7–0.9 typical)
+    if (confidence > 0.8f) {
+        std::cout << "Detected: " << LABELS[pred_idx]
+            << " (confidence: " << confidence << ")\n";
+    }
 }
 
-int CKeywordSpotter::argmax(const float* x, int n)
+int KeywordSpotter::argmax(const float* data, int size)
 {
-    return std::max_element(x, x + n) - x;
+    return static_cast<int>(std::max_element(data, data + size) - data);
 }
+

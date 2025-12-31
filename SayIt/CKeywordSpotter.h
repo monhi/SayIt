@@ -1,59 +1,87 @@
+// CKeywordSpotter.h
+
 #pragma once
 
-#include <vector>
-#include <deque>
-#include <string>
-#include <array>
 #include <onnxruntime_cxx_api.h>
 #include "kissfft/kiss_fftr.h"
+#include <deque>
+#include <vector>
+#include <string>
+#include <array>
+#include <memory>
 
-class CKeywordSpotter
-{
+constexpr int SAMPLE_RATE = 16000;
+constexpr int DURATION = 1;                  // 1 second
+constexpr int WINDOW_SIZE = SAMPLE_RATE * DURATION;  // 16000 samples
+constexpr int N_FFT = 512;
+constexpr int WIN_LENGTH = 400;              // 25 ms @ 16kHz
+constexpr int HOP_LENGTH = 160;              // 10 ms @ 16kHz
+constexpr int N_MELS = 40;
+constexpr int FRAMES = 101;                  // Exact number of frames for 1-second audio
+
+constexpr const char* LABELS[] = {
+    "down", "go", "left", "no",
+    "right", "stop", "up", "yes",
+    "_noise_"
+};
+constexpr int NUM_CLASSES = sizeof(LABELS) / sizeof(LABELS[0]);
+
+class KeywordSpotter {
 public:
-    explicit CKeywordSpotter(const std::wstring& onnxModelPath);
+    /**
+     * @brief Construct a new KeywordSpotter object
+     * @param onnxPath Path to the exported ONNX model (kws.onnx)
+     */
+    explicit KeywordSpotter(const std::wstring& onnxPath);
 
-    // Feed microphone samples (float, 16kHz)
-    // Returns true if inference was executed
+    /**
+     * @brief Destructor - cleans up FFT config and ONNX resources
+     */
+    ~KeywordSpotter();
+
+    /**
+     * @brief Process a chunk of incoming audio samples (real-time streaming)
+     * @param samples New audio samples (16kHz, float, range usually [-1, 1])
+     * @return true if at least one inference was performed
+     */
     bool processAudio(const std::vector<float>& samples);
 
+    /**
+     * @brief Process an entire WAV file buffer at once (offline mode)
+     * @param samples Full audio samples (16kHz, float)
+     */
+    void processWavFile(const std::vector<float>& samples);
+
 private:
+    // ONNX Runtime members
+    Ort::Env m_env;
+    Ort::Session m_session{ nullptr };
+    std::string m_inputName;
+    std::string m_outputName;
+
+    // Audio buffer for streaming
+    std::deque<float> m_audioBuffer;
+    int m_samplesSinceLastInfer = 0;
+
+    // Feature extraction
+    kiss_fftr_cfg m_fftCfg;
+    std::vector<float> m_fftFrame;              // size: N_FFT (padded)
+    std::vector<kiss_fft_cpx> m_fftOut;          // size: N_FFT/2 + 1
+    std::vector<float> m_hannWindow;             // size: WIN_LENGTH
+    std::vector<std::vector<float>> m_melFilterBank;  // [N_MELS][N_FFT/2 + 1]
+    std::vector<float> m_features;              // flattened: N_MELS * FRAMES
+
+    // Initialization helpers
+    void initHannWindow();
+    void initMelFilterBank();
+    float hz_to_mel(float f);
+    float mel_to_hz(float m);
+
+    // Processing steps
+    void preEmphasis(std::vector<float>& frame);  // Currently unused (librosa default is no pre-emph)
     void extractLogMel();
     void runInference();
-    void softmax(float* x, int n);
-    int argmax(const float* x, int n);
-    void initMelFilterBank();
 
-private:
-    // Audio buffer (1 second)
-    std::deque<float> m_audioBuffer;
-
-    // ONNX Runtime
-    Ort::Env m_env;
-    Ort::Session m_session;
-    Ort::MemoryInfo m_memoryInfo;
-
-    // Feature buffer: [1, 1, 40, 98]
-    std::vector<float> m_features;
-
-    // Mel filter bank: 40x257
-    std::vector<std::vector<float>> m_melFilterBank;
-
-    // FFT config
-    kiss_fftr_cfg m_fftCfg = nullptr;
-
-    // Hop counter
-    size_t m_samplesSinceLastInfer = 0;
-    int m_lastDetectedWord = -1;
-
-    // Constants
-    static constexpr int SAMPLE_RATE = 16000;
-    static constexpr int WINDOW_SIZE = 16000;
-    static constexpr int FRAME_LEN = 400;
-    static constexpr int HOP_LEN = 160;
-    static constexpr int FFT_SIZE = 512;
-    static constexpr int MEL_BINS = 40;
-    static constexpr int NUM_FRAMES = 98;
-    static constexpr int NUM_CLASSES = 9;
-
-    static const char* LABELS[NUM_CLASSES];
+    // Utility
+    static int argmax(const float* x, int n);
 };

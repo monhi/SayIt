@@ -143,6 +143,7 @@
     <ClCompile Include="kissfft\kiss_fftndr.c" />
     <ClCompile Include="kissfft\kiss_fftr.c" />
     <ClCompile Include="SayIt.cpp" />
+    <ClCompile Include="WavReader.cpp" />
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="CKeywordSpotter.h" />
@@ -169,6 +170,7 @@
     <ClInclude Include="onnxruntime-win-x64-1.23.2\include\onnxruntime_training_cxx_inline.h" />
     <ClInclude Include="onnxruntime-win-x64-1.23.2\include\onnxruntime_training_c_api.h" />
     <ClInclude Include="onnxruntime-win-x64-1.23.2\include\provider_options.h" />
+    <ClInclude Include="WavReader.h" />
   </ItemGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ImportGroup Label="ExtensionTargets">

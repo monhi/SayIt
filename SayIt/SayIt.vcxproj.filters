@@ -51,6 +51,9 @@
     <ClCompile Include="kissfft\kiss_fftndr.c">
       <Filter>Source Files\kissfft</Filter>
     </ClCompile>
+    <ClCompile Include="WavReader.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
   </ItemGroup>
   <ItemGroup>
     <ClInclude Include="CWaveIn.h">
@@ -124,6 +127,9 @@
     </ClInclude>
     <ClInclude Include="kissfft\kissfft_i32.hh">
       <Filter>Header Files\kissfft</Filter>
+    </ClInclude>
+    <ClInclude Include="WavReader.h">
+      <Filter>Header Files</Filter>
     </ClInclude>
   </ItemGroup>
 </Project>
