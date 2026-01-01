@@ -18,7 +18,9 @@
 mono_crash.*
 
 # Build results
-Learning
+Learning/data
+Learning/mini_speech_commands
+
 [Dd]ebug/
 [Dd]ebugPublic/
 [Rr]elease/
