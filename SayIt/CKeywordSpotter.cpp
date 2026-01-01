@@ -127,21 +127,25 @@ void KeywordSpotter::initMelFilterBank()
 
 bool KeywordSpotter::processAudio(const std::vector<float>& samples)
 {
-    for (float s : samples) {
+    for (float s : samples) 
+    {
         m_audioBuffer.push_back(s);
     }
 
-    if (m_audioBuffer.size() < WINDOW_SIZE) {
+    if (m_audioBuffer.size() < WINDOW_SIZE) 
+    {
         return false;
     }
 
     // Simple hop control (process every HOP_LENGTH new samples)
     m_samplesSinceLastInfer += samples.size();
-    if (m_samplesSinceLastInfer < HOP_LENGTH) {
+    if (m_samplesSinceLastInfer < HOP_LENGTH) 
+    {
         return false;
     }
     m_samplesSinceLastInfer = 0;
 
+    /*
     while (m_audioBuffer.size() >= WINDOW_SIZE) {
         extractLogMel();
         runInference();
@@ -151,7 +155,22 @@ bool KeywordSpotter::processAudio(const std::vector<float>& samples)
             m_audioBuffer.pop_front();
         }
     }
+    */
+    while (m_audioBuffer.size() >= WINDOW_SIZE) {
+        if (isSilent()) {
+            // std::cout << "Silent frame - skipping inference\n";
+            // Still slide the window to avoid backlog
+        }
+        else {
+            extractLogMel();
+            runInference();
+        }
 
+        // Always slide forward
+        for (int i = 0; i < HOP_LENGTH; ++i) {
+            m_audioBuffer.pop_front();
+        }
+    }
     return true;
 }
 
@@ -181,39 +200,47 @@ void KeywordSpotter::processWavFile(const std::vector<float>& samples)
     }
 }
 
+
 void KeywordSpotter::extractLogMel()
 {
     assert(m_audioBuffer.size() >= WINDOW_SIZE);
 
-    // Reflective padding to match librosa's default 'reflect' mode
+    // Use only the most recent WINDOW_SIZE samples
+    auto start_it = m_audioBuffer.end() - WINDOW_SIZE;
+    std::vector<float> current_window(start_it, m_audioBuffer.end());
+
+    // Reflective padding around the current 1-second window
     const int pad = N_FFT / 2; // 256
     std::vector<float> padded(WINDOW_SIZE + 2 * pad);
 
-    // Left reflect
+    // Left reflective pad
     for (int i = 0; i < pad; ++i) {
-        padded[i] = m_audioBuffer[pad - 1 - i];
-    }
-    // Center
-    std::copy(m_audioBuffer.begin(), m_audioBuffer.end(), padded.begin() + pad);
-    // Right reflect
-    for (int i = 0; i < pad; ++i) {
-        padded[pad + WINDOW_SIZE + i] = m_audioBuffer[WINDOW_SIZE - 2 - i];
+        padded[i] = current_window[pad - 1 - i];
     }
 
+    // Center: current window
+    std::copy(current_window.begin(), current_window.end(), padded.begin() + pad);
+
+    // Right reflective pad
+    for (int i = 0; i < pad; ++i) {
+        padded[pad + WINDOW_SIZE + i] = current_window[WINDOW_SIZE - 2 - i];
+    }
+
+    // Now process frames
     for (int frame_idx = 0; frame_idx < FRAMES; ++frame_idx) {
         int start = frame_idx * HOP_LENGTH;
 
-        // Apply window
+        // Apply Hann window
         for (int i = 0; i < WIN_LENGTH; ++i) {
             m_fftFrame[i] = padded[start + i] * m_hannWindow[i];
         }
-        // Zero-pad rest
+        // Zero-pad the rest to N_FFT
         std::fill(m_fftFrame.begin() + WIN_LENGTH, m_fftFrame.end(), 0.0f);
 
         // FFT
         kiss_fftr(m_fftCfg, m_fftFrame.data(), m_fftOut.data());
 
-        // Mel energy
+        // Compute mel energies
         for (int m = 0; m < N_MELS; ++m) {
             float energy = 0.0f;
             for (int k = 0; k <= N_FFT / 2; ++k) {
@@ -225,7 +252,22 @@ void KeywordSpotter::extractLogMel()
             m_features[m * FRAMES + frame_idx] = std::log(energy);
         }
     }
-    // No normalization — matches training
+}
+
+bool KeywordSpotter::isSilent() const
+{
+    // Use only the current 1-second window
+    auto start_it = m_audioBuffer.end() - WINDOW_SIZE;
+    float energy = 0.0f;
+    for (auto it = start_it; it != m_audioBuffer.end(); ++it) {
+        float s = *it;
+        energy += s * s;
+    }
+    energy /= WINDOW_SIZE;
+
+    // Adjust this threshold based on your microphone (typical values: 1e-5 to 1e-3)
+    // For normalized [-1,1] audio, silence is usually < 1e-4
+    return energy < 1e-4f;  // Tune this!
 }
 
 void KeywordSpotter::runInference()
@@ -261,17 +303,21 @@ void KeywordSpotter::runInference()
         probs[i] = std::exp(logits[i] - max_logit);
         sum += probs[i];
     }
-    for (int i = 0; i < NUM_CLASSES; ++i) {
+    for (int i = 0; i < NUM_CLASSES; ++i) 
+    {
         probs[i] /= sum;
     }
 
     int pred_idx = std::max_element(probs.begin(), probs.end()) - probs.begin();
     float confidence = probs[pred_idx];
+    float noise_conf = probs[8];  // "_noise_" is index 8
 
-    // Adjust threshold based on your model's performance (0.7–0.9 typical)
-    if (confidence > 0.8f) {
-        std::cout << "Detected: " << LABELS[pred_idx]
-            << " (confidence: " << confidence << ")\n";
+
+    if (pred_idx != 8 &&              // not _noise_
+        confidence > 0.85f &&         // high confidence
+        noise_conf < 0.3f)            // _noise_ not dominant
+    {
+        std::cout << "Detected: " << LABELS[pred_idx] << " (confidence: " << confidence << ")\n";
     }
 }
 

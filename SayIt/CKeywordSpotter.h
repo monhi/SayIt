@@ -80,6 +80,7 @@ private:
     // Processing steps
     void preEmphasis(std::vector<float>& frame);  // Currently unused (librosa default is no pre-emph)
     void extractLogMel();
+    bool isSilent() const;
     void runInference();
 
     // Utility

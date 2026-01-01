@@ -24,15 +24,14 @@ int main(int argc, char* argv[])
         if (!WavReader::loadMono16k(argv[1], wav))
         {
             return 1;
-        }            
-
+        }
         std::cout << "Offline WAV test: " << argv[1] << std::endl;
         kws.processWavFile(wav);
         return 0;
     }
 
-    std::string filename = "monhi123.raw";
-    std::ofstream file(filename, std::ios::binary);
+    //std::string filename = "monhi123.raw";
+    //std::ofstream file(filename, std::ios::binary);
 
     CWaveIn mic(10);
     if (!mic.start()) return 1;
@@ -51,7 +50,7 @@ int main(int argc, char* argv[])
             // save data into a file.
             // std::cout << "Samples read: " << n << std::endl;
             // Send audioChunk directly to ONNX feature extraction
-            file.write(reinterpret_cast<const char*>(audioChunk.data()),audioChunk.size() * sizeof(float));
+            //file.write(reinterpret_cast<const char*>(audioChunk.data()),audioChunk.size() * sizeof(float));
             kws.processAudio(audioChunk);
         }
         Sleep(2);
