@@ -39,17 +39,6 @@ A special `_noise_` class helps reject non-keyword audio and silence.
 - **Mel filterbank**: Custom implementation matching librosa behavior
 - **Build**: Visual Studio 2022 (MSVC) – recommended and default development environment
 
-### Project Structure
-SayIt/
-├── train_kws.py              # Training script (PyTorch → ONNX export)
-├── kws.onnx                  # Trained model (must be placed next to exe)
-├── kws.onnx.data             # External data file for some ONNX models (if present)
-├── onnxruntime.dll           # Required runtime DLL (copy next to exe)
-├── KeywordSpotter.cpp        # Core inference + feature extraction
-├── CKeywordSpotter.h         # Header with all constants and class definition
-├── main.cpp                  # Example microphone / WAV processing loop
-├── kissfft/                  # KissFFT library (submodule or included)
-└── README.md
 
 
 ### Build Instructions (Windows)
