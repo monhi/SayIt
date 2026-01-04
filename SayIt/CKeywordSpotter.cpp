@@ -5,6 +5,7 @@
 #include <cassert>
 #include <vector>
 #include <deque>
+#include <stdexcept>
 
 KeywordSpotter::KeywordSpotter(const std::wstring& onnxPath)
     : m_env(ORT_LOGGING_LEVEL_WARNING, "kws")
@@ -31,6 +32,10 @@ KeywordSpotter::KeywordSpotter(const std::wstring& onnxPath)
 
     // Feature buffer: N_MELS × FRAMES
     m_features.resize(N_MELS * FRAMES, 0.0f);
+
+    // State init
+    m_lastDetectedWord = "";
+    m_suppressionFrames = 0;
 }
 
 KeywordSpotter::~KeywordSpotter()
@@ -125,53 +130,64 @@ void KeywordSpotter::initMelFilterBank()
     }
 }
 
+bool KeywordSpotter::isSilent() const
+{
+    if (m_audioBuffer.size() < WINDOW_SIZE) return true;
+
+    // Use only the most recent WINDOW_SIZE samples
+    auto start_it = m_audioBuffer.end() - WINDOW_SIZE;
+    float energy = 0.0f;
+    for (auto it = start_it; it != m_audioBuffer.end(); ++it) {
+        float s = *it;
+        energy += s * s;
+    }
+    energy /= WINDOW_SIZE;
+
+    // Tune this threshold based on your mic (e.g., 1e-5 to 1e-3 for silence)
+    return energy < 1e-4f;
+}
+
 bool KeywordSpotter::processAudio(const std::vector<float>& samples)
 {
-    for (float s : samples) 
-    {
+    for (float s : samples) {
         m_audioBuffer.push_back(s);
     }
 
-    if (m_audioBuffer.size() < WINDOW_SIZE) 
-    {
+    if (m_audioBuffer.size() < WINDOW_SIZE) {
         return false;
     }
 
     // Simple hop control (process every HOP_LENGTH new samples)
     m_samplesSinceLastInfer += samples.size();
-    if (m_samplesSinceLastInfer < HOP_LENGTH) 
-    {
+    if (m_samplesSinceLastInfer < HOP_LENGTH) {
         return false;
     }
     m_samplesSinceLastInfer = 0;
 
-    /*
+    bool inferred = false;
     while (m_audioBuffer.size() >= WINDOW_SIZE) {
-        extractLogMel();
-        runInference();
+        if (isSilent()) {
+            m_lastDetectedWord = "";
+            m_suppressionFrames = 0;
+        }
+        else {
+            extractLogMel();
+            runInference();
+            inferred = true;
+        }
+
+        // Decrement suppression each frame
+        if (m_suppressionFrames > 0) {
+            --m_suppressionFrames;
+        }
 
         // Slide window
         for (int i = 0; i < HOP_LENGTH; ++i) {
             m_audioBuffer.pop_front();
         }
     }
-    */
-    while (m_audioBuffer.size() >= WINDOW_SIZE) {
-        if (isSilent()) {
-            // std::cout << "Silent frame - skipping inference\n";
-            // Still slide the window to avoid backlog
-        }
-        else {
-            extractLogMel();
-            runInference();
-        }
 
-        // Always slide forward
-        for (int i = 0; i < HOP_LENGTH; ++i) {
-            m_audioBuffer.pop_front();
-        }
-    }
-    return true;
+    return inferred;
 }
 
 void KeywordSpotter::processWavFile(const std::vector<float>& samples)
@@ -193,13 +209,19 @@ void KeywordSpotter::processWavFile(const std::vector<float>& samples)
             m_audioBuffer.begin() + offset + WINDOW_SIZE);
         m_audioBuffer = std::move(window);
 
-        extractLogMel();
-        runInference();
+        if (!isSilent()) {
+            extractLogMel();
+            runInference();
+        }
+
+        // Decrement suppression (offline mode may not need full state machine, but consistent)
+        if (m_suppressionFrames > 0) {
+            --m_suppressionFrames;
+        }
 
         offset += HOP_LENGTH;
     }
 }
-
 
 void KeywordSpotter::extractLogMel()
 {
@@ -226,21 +248,20 @@ void KeywordSpotter::extractLogMel()
         padded[pad + WINDOW_SIZE + i] = current_window[WINDOW_SIZE - 2 - i];
     }
 
-    // Now process frames
     for (int frame_idx = 0; frame_idx < FRAMES; ++frame_idx) {
         int start = frame_idx * HOP_LENGTH;
 
-        // Apply Hann window
+        // Apply window
         for (int i = 0; i < WIN_LENGTH; ++i) {
             m_fftFrame[i] = padded[start + i] * m_hannWindow[i];
         }
-        // Zero-pad the rest to N_FFT
+        // Zero-pad rest
         std::fill(m_fftFrame.begin() + WIN_LENGTH, m_fftFrame.end(), 0.0f);
 
         // FFT
         kiss_fftr(m_fftCfg, m_fftFrame.data(), m_fftOut.data());
 
-        // Compute mel energies
+        // Mel energy
         for (int m = 0; m < N_MELS; ++m) {
             float energy = 0.0f;
             for (int k = 0; k <= N_FFT / 2; ++k) {
@@ -252,22 +273,7 @@ void KeywordSpotter::extractLogMel()
             m_features[m * FRAMES + frame_idx] = std::log(energy);
         }
     }
-}
-
-bool KeywordSpotter::isSilent() const
-{
-    // Use only the current 1-second window
-    auto start_it = m_audioBuffer.end() - WINDOW_SIZE;
-    float energy = 0.0f;
-    for (auto it = start_it; it != m_audioBuffer.end(); ++it) {
-        float s = *it;
-        energy += s * s;
-    }
-    energy /= WINDOW_SIZE;
-
-    // Adjust this threshold based on your microphone (typical values: 1e-5 to 1e-3)
-    // For normalized [-1,1] audio, silence is usually < 1e-4
-    return energy < 1e-4f;  // Tune this!
+    // No normalization — matches training
 }
 
 void KeywordSpotter::runInference()
@@ -303,21 +309,30 @@ void KeywordSpotter::runInference()
         probs[i] = std::exp(logits[i] - max_logit);
         sum += probs[i];
     }
-    for (int i = 0; i < NUM_CLASSES; ++i) 
-    {
+    for (int i = 0; i < NUM_CLASSES; ++i) {
         probs[i] /= sum;
     }
 
     int pred_idx = std::max_element(probs.begin(), probs.end()) - probs.begin();
     float confidence = probs[pred_idx];
-    float noise_conf = probs[8];  // "_noise_" is index 8
+    float noise_conf = probs[NOISE_INDEX];
 
-
-    if (pred_idx != 8 &&              // not _noise_
-        confidence > 0.85f &&         // high confidence
-        noise_conf < 0.3f)            // _noise_ not dominant
-    {
-        std::cout << "Detected: " << LABELS[pred_idx] << " (confidence: " << confidence << ")\n";
+    // Detection logic with state machine
+    if (pred_idx != NOISE_INDEX && confidence > 0.85f && noise_conf < 0.3f) {
+        std::string word = LABELS[pred_idx];
+        if (m_suppressionFrames == 0 || word != m_lastDetectedWord) {
+            std::cout << "Detected: " << word
+                << " (confidence: " << confidence << ")\n";
+            m_lastDetectedWord = word;
+            m_suppressionFrames = SUPPRESSION_DURATION;
+        }
+        // If same word, do nothing (suppression active)
+    }
+    else {
+        // Noise or low conf: check if we can reset
+        if (m_suppressionFrames == 0) {
+            m_lastDetectedWord = "";
+        }
     }
 }
 
@@ -325,4 +340,3 @@ int KeywordSpotter::argmax(const float* data, int size)
 {
     return static_cast<int>(std::max_element(data, data + size) - data);
 }
-

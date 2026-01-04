@@ -19,12 +19,15 @@ constexpr int HOP_LENGTH = 160;              // 10 ms @ 16kHz
 constexpr int N_MELS = 40;
 constexpr int FRAMES = 101;                  // Exact number of frames for 1-second audio
 
+constexpr int SUPPRESSION_DURATION = 200;    // ~2 seconds (200 frames at 10ms hop)
+
 constexpr const char* LABELS[] = {
     "down", "go", "left", "no",
     "right", "stop", "up", "yes",
     "_noise_"
 };
 constexpr int NUM_CLASSES = sizeof(LABELS) / sizeof(LABELS[0]);
+constexpr int NOISE_INDEX = 8;
 
 class KeywordSpotter {
 public:
@@ -71,18 +74,21 @@ private:
     std::vector<std::vector<float>> m_melFilterBank;  // [N_MELS][N_FFT/2 + 1]
     std::vector<float> m_features;              // flattened: N_MELS * FRAMES
 
+    // State machine for detection suppression
+    std::string m_lastDetectedWord;
+    int m_suppressionFrames = 0;
+
     // Initialization helpers
     void initHannWindow();
     void initMelFilterBank();
-    float hz_to_mel(float f);
-    float mel_to_hz(float m);
+    float hz_to_mel(float hz);
+    float mel_to_hz(float mel);
 
     // Processing steps
-    void preEmphasis(std::vector<float>& frame);  // Currently unused (librosa default is no pre-emph)
     void extractLogMel();
-    bool isSilent() const;
     void runInference();
 
     // Utility
-    static int argmax(const float* x, int n);
+    bool isSilent() const;
+    static int argmax(const float* data, int size);
 };
